@@ -13,9 +13,10 @@ to strip the background and re-grid the frames into a clean, ready-to-use sheet.
    prompt assumes the model already has your character in context.
 2. Copy the contents of the prompt file you want (e.g. `idle.md`) and send it.
 3. Download the generated spritesheet.
-4. Clean it up with the cleaner, using the 4×4 grid these prompts produce:
+4. Clean it up with the cleaner — 4×4 is the default grid, so just pass the file:
    ```bash
-   python clean_spritesheet.py generated.png idle_clean.png --cols 4 --rows 4
+   python clean_spritesheet.py generated.png
+   # -> generated.<timestamp>.png
    ```
 
 ## System requirements / conventions

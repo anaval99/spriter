@@ -8,16 +8,22 @@ Steps:
      so interior near-bg pixels are not eaten).
   3. Find each character via connected-components on the alpha mask.
   4. Re-place each character, centered, in a uniform grid
-     (default 6 cols x 2 rows).
+     (default 4 cols x 4 rows).
 
 Handles white, pink, gray, or any other solid color background that
 appears in the four corners. JPEG noise is tolerated via a color
 distance threshold and a `min_area` filter on connected components.
 
 Usage:
-    python clean_spritesheet.py input.png output.png [--cols 6 --rows 2]
+    python clean_spritesheet.py input.png [output.png] [--cols 4 --rows 4]
+
+If output is omitted, it is written next to the input as
+"<name>.<timestamp>.<ext>" (e.g. idle.png -> idle.20260626-153045.png).
 """
 import argparse
+from datetime import datetime
+from pathlib import Path
+
 import numpy as np
 from PIL import Image
 from scipy import ndimage
@@ -104,9 +110,10 @@ def sort_boxes_to_grid(boxes, rows, cols):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
-    ap.add_argument("output")
-    ap.add_argument("--cols", type=int, default=6)
-    ap.add_argument("--rows", type=int, default=2)
+    ap.add_argument("output", nargs="?", default=None,
+                    help="output path (default: <input>.<timestamp>.png next to input)")
+    ap.add_argument("--cols", type=int, default=4)
+    ap.add_argument("--rows", type=int, default=4)
     ap.add_argument("--bg-color", type=str, default=None,
                     help="override auto-detection, e.g. '253,232,237'")
     ap.add_argument("--hard-dist", type=float, default=18.0,
@@ -117,6 +124,13 @@ def main():
     ap.add_argument("--min-area", type=int, default=2000,
                     help="ignore connected blobs smaller than this many pixels")
     args = ap.parse_args()
+
+    if args.output:
+        output = args.output
+    else:
+        p = Path(args.input)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output = str(p.with_name(f"{p.stem}.{ts}{p.suffix or '.png'}"))
 
     src = Image.open(args.input).convert("RGB")
     rgb = np.array(src)
@@ -169,8 +183,8 @@ def main():
         px = c * cell_w + (cell_w - cw) // 2
         out[py:py + ch, px:px + cw] = char
 
-    Image.fromarray(out, "RGBA").save(args.output)
-    print(f"wrote {args.output}: {out.shape[1]}x{out.shape[0]}")
+    Image.fromarray(out, "RGBA").save(output)
+    print(f"wrote {output}: {out.shape[1]}x{out.shape[0]}")
 
 
 if __name__ == "__main__":

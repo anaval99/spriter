@@ -22,3 +22,10 @@ out/
 output/
 *_cleaned.png
 *_clean.png
+# Timestamped cleaner outputs, e.g. idle.20260626-153045.png
+*.[0-9]*-[0-9]*.png
+
+# Source/generated images (inputs to the cleaner) — keep them out of the repo
+*.jpg
+*.jpeg
+Generated Image*

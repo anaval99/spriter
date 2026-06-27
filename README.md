@@ -25,11 +25,21 @@ pip install pillow numpy scipy
 
 ## Usage
 
+The only required argument is the input. The output is written next to it as
+`<name>.<timestamp>.png`:
+
+```bash
+python clean_spritesheet.py my_unclean_image.png
+# -> my_unclean_image.20260626-153045.png
+```
+
+Pass a second argument to choose the output name explicitly:
+
 ```bash
 python clean_spritesheet.py input.png output.png
 ```
 
-Defaults to a 6×2 grid. Override with `--cols` / `--rows`:
+Defaults to a 4×4 grid (16 frames). Override with `--cols` / `--rows`:
 
 ```bash
 python clean_spritesheet.py walk.png walk_clean.png --cols 8 --rows 4
@@ -39,8 +49,8 @@ python clean_spritesheet.py walk.png walk_clean.png --cols 8 --rows 4
 
 | Flag | Default | What it does |
 | --- | --- | --- |
-| `--cols` | 6 | Columns in the grid |
-| `--rows` | 2 | Rows in the grid |
+| `--cols` | 4 | Columns in the grid |
+| `--rows` | 4 | Rows in the grid |
 | `--bg-color` | (auto) | Override bg detection, e.g. `--bg-color 253,232,237` |
 | `--hard-dist` | 18 | Color distance below which a pixel is fully transparent |
 | `--soft-dist` | 40 | Distance above which a pixel is fully opaque (ramp between) |
