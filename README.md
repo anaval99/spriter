@@ -20,10 +20,25 @@ This script fixes all three:
 ## Install
 
 ```bash
-pip install pillow numpy scipy
+pip install -r requirements.txt
 ```
 
-## Usage
+(or `pip install pillow numpy scipy flask` — Flask is only needed for the web UI)
+
+## Web UI
+
+Prefer buttons over the terminal? Run the local web app:
+
+```bash
+python app.py
+# open http://127.0.0.1:5000
+```
+
+Upload a spritesheet, set cols/rows (default 4×4), click **Run cleanup** to see the
+transparent result, optionally enter a pixel amount and click **Trim outline** to shave
+leftover fringe off each character's edge, then **Download PNG**.
+
+## Usage (CLI)
 
 The only required argument is the input. The output is written next to it as
 `<name>.<timestamp>.png`:
@@ -56,6 +71,7 @@ python clean_spritesheet.py walk.png walk_clean.png --cols 8 --rows 4
 | `--soft-dist` | 40 | Distance above which a pixel is fully opaque (ramp between) |
 | `--padding` | 8 | Transparent pixels around each character in the output |
 | `--min-area` | 2000 | Ignore connected blobs smaller than this (filters JPEG noise) |
+| `--trim` | 0 | Erode each character's edge inward by N pixels (removes leftover fringe) |
 
 ### Tuning
 

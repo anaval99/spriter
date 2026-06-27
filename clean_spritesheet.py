@@ -164,6 +164,89 @@ def sort_boxes_to_grid(boxes, rows, cols):
     return ordered
 
 
+def clean_image(rgb: np.ndarray, cols: int = 4, rows: int = 4,
+                bg_color: np.ndarray = None, hard_dist: float = 18.0,
+                soft_dist: float = 40.0, padding: int = 8,
+                min_area: int = 2000):
+    """Run the full cleanup pipeline on an RGB array.
+
+    Returns (out_rgba, info) where out_rgba is the composed RGBA spritesheet
+    and info is a dict describing what happened (for logging or the UI).
+    Shared by the CLI (`main`) and the web server (`app.py`).
+    """
+    bg = bg_color if bg_color is not None else detect_bg_colors(rgb)
+
+    alpha = build_alpha(rgb, bg, hard_dist, soft_dist)
+    coverage = float((alpha > 0).mean() * 100)
+
+    boxes = extract_characters(alpha, min_area)
+    found = len(boxes)
+    expected = rows * cols
+    fell_back = found != expected
+
+    if fell_back:
+        h, w = rgb.shape[:2]
+        cell_h, cell_w = h // rows, w // cols
+        boxes = []
+        for r in range(rows):
+            for c in range(cols):
+                y0, x0 = r * cell_h, c * cell_w
+                y1, x1 = y0 + cell_h, x0 + cell_w
+                sub = alpha[y0:y1, x0:x1] > 32
+                if sub.any():
+                    ys, xs = np.where(sub)
+                    boxes.append((y0 + ys.min(), y0 + ys.max() + 1,
+                                  x0 + xs.min(), x0 + xs.max() + 1))
+                else:
+                    boxes.append((y0, y1, x0, x1))
+    else:
+        boxes = sort_boxes_to_grid(boxes, rows, cols)
+
+    rgba = np.dstack([rgb, alpha])
+    max_h = max(b[1] - b[0] for b in boxes)
+    max_w = max(b[3] - b[2] for b in boxes)
+    cell_h = max_h + 2 * padding
+    cell_w = max_w + 2 * padding
+
+    out = np.zeros((cell_h * rows, cell_w * cols, 4), dtype=np.uint8)
+    for idx, (y0, y1, x0, x1) in enumerate(boxes):
+        r, c = idx // cols, idx % cols
+        char = rgba[y0:y1, x0:x1]
+        ch, cw = char.shape[:2]
+        py = r * cell_h + (cell_h - ch) // 2
+        px = c * cell_w + (cell_w - cw) // 2
+        out[py:py + ch, px:px + cw] = char
+
+    info = {
+        "bg_colors": bg,
+        "coverage": coverage,
+        "found": found,
+        "expected": expected,
+        "fell_back": fell_back,
+        "cell_size": (cell_w, cell_h),
+    }
+    return out, info
+
+
+def trim_outline(rgba: np.ndarray, n: int) -> np.ndarray:
+    """Erode each character's silhouette inward by `n` pixels.
+
+    Removes the leftover fringe/halo of stray pixels that can ring a
+    character after cleanup. Operates on the whole sheet at once: because
+    frames are separated by transparent gaps, this shrinks every
+    character's outline uniformly. Soft (anti-aliased) edges are preserved
+    because we grey-erode the alpha channel rather than a hard binary mask.
+    """
+    out = rgba.copy()
+    if n <= 0:
+        return out
+    alpha = out[:, :, 3]
+    eroded = ndimage.grey_erosion(alpha, size=(2 * n + 1, 2 * n + 1))
+    out[:, :, 3] = eroded
+    out[eroded == 0, :3] = 0
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
@@ -182,6 +265,9 @@ def main():
     ap.add_argument("--padding", type=int, default=8)
     ap.add_argument("--min-area", type=int, default=2000,
                     help="ignore connected blobs smaller than this many pixels")
+    ap.add_argument("--trim", type=int, default=0,
+                    help="erode each character's edge inward by this many pixels "
+                         "(removes leftover fringe); 0 = off")
     args = ap.parse_args()
 
     if args.output:
@@ -204,50 +290,23 @@ def main():
         bg = np.array([[int(x) for x in part.split(",")]
                        for part in args.bg_color.split(";")], dtype=np.float32)
     else:
-        bg = detect_bg_colors(rgb)
+        bg = None
+
+    out, info = clean_image(rgb, args.cols, args.rows, bg, args.hard_dist,
+                            args.soft_dist, args.padding, args.min_area)
+
     print("background color(s): " +
-          ", ".join(f"RGB({int(c[0])}, {int(c[1])}, {int(c[2])})" for c in bg))
-
-    alpha = build_alpha(rgb, bg, args.hard_dist, args.soft_dist)
-    print(f"foreground coverage: {(alpha > 0).mean() * 100:.1f}%")
-
-    boxes = extract_characters(alpha, args.min_area)
-    print(f"found {len(boxes)} connected components (expected {args.rows * args.cols})")
-
-    if len(boxes) != args.rows * args.cols:
+          ", ".join(f"RGB({int(c[0])}, {int(c[1])}, {int(c[2])})"
+                    for c in info["bg_colors"]))
+    print(f"foreground coverage: {info['coverage']:.1f}%")
+    print(f"found {info['found']} connected components (expected {info['expected']})")
+    if info["fell_back"]:
         print("WARN: blob count doesn't match grid. Falling back to nominal grid split.")
-        h, w = rgb.shape[:2]
-        cell_h, cell_w = h // args.rows, w // args.cols
-        boxes = []
-        for r in range(args.rows):
-            for c in range(args.cols):
-                y0, x0 = r * cell_h, c * cell_w
-                y1, x1 = y0 + cell_h, x0 + cell_w
-                sub = alpha[y0:y1, x0:x1] > 32
-                if sub.any():
-                    ys, xs = np.where(sub)
-                    boxes.append((y0 + ys.min(), y0 + ys.max() + 1,
-                                  x0 + xs.min(), x0 + xs.max() + 1))
-                else:
-                    boxes.append((y0, y1, x0, x1))
-    else:
-        boxes = sort_boxes_to_grid(boxes, args.rows, args.cols)
+    print(f"output cell size: {info['cell_size'][0]}x{info['cell_size'][1]}")
 
-    rgba = np.dstack([rgb, alpha])
-    max_h = max(b[1] - b[0] for b in boxes)
-    max_w = max(b[3] - b[2] for b in boxes)
-    cell_h = max_h + 2 * args.padding
-    cell_w = max_w + 2 * args.padding
-    print(f"output cell size: {cell_w}x{cell_h}")
-
-    out = np.zeros((cell_h * args.rows, cell_w * args.cols, 4), dtype=np.uint8)
-    for idx, (y0, y1, x0, x1) in enumerate(boxes):
-        r, c = idx // args.cols, idx % args.cols
-        char = rgba[y0:y1, x0:x1]
-        ch, cw = char.shape[:2]
-        py = r * cell_h + (cell_h - ch) // 2
-        px = c * cell_w + (cell_w - cw) // 2
-        out[py:py + ch, px:px + cw] = char
+    if args.trim > 0:
+        out = trim_outline(out, args.trim)
+        print(f"trimmed outline by {args.trim}px")
 
     Image.fromarray(out, "RGBA").save(output)
     print(f"wrote {output}: {out.shape[1]}x{out.shape[0]}")
