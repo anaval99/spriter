@@ -1,0 +1,67 @@
+# spritesheet-cleaner
+
+Clean up AI-generated spritesheets (Gemini, ChatGPT, etc.) by removing solid-color backgrounds, fixing frame bleed, and re-aligning characters into a uniform grid.
+
+## What it does
+
+AI image models tend to produce spritesheets with three problems:
+1. **No real transparency** — the background is a solid color (white, pink, gray) instead of an alpha channel.
+2. **Frame bleed** — parts of one character spill into the neighboring cell.
+3. **Misalignment** — characters aren't centered consistently in their cells.
+
+This script fixes all three:
+
+- Auto-detects the background color from the four corners.
+- Converts background pixels to true alpha with a soft anti-aliased edge.
+- Uses a border flood-fill so pale pixels inside the character (highlights, etc.) aren't eaten.
+- Finds each character via connected-components on the alpha mask — so grid misalignment and frame bleed don't matter.
+- Re-centers every character in a uniform cell.
+
+## Install
+
+```bash
+pip install pillow numpy scipy
+```
+
+## Usage
+
+```bash
+python clean_spritesheet.py input.png output.png
+```
+
+Defaults to a 6×2 grid. Override with `--cols` / `--rows`:
+
+```bash
+python clean_spritesheet.py walk.png walk_clean.png --cols 8 --rows 4
+```
+
+### Options
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--cols` | 6 | Columns in the grid |
+| `--rows` | 2 | Rows in the grid |
+| `--bg-color` | (auto) | Override bg detection, e.g. `--bg-color 253,232,237` |
+| `--hard-dist` | 18 | Color distance below which a pixel is fully transparent |
+| `--soft-dist` | 40 | Distance above which a pixel is fully opaque (ramp between) |
+| `--padding` | 8 | Transparent pixels around each character in the output |
+| `--min-area` | 2000 | Ignore connected blobs smaller than this (filters JPEG noise) |
+
+### Tuning
+
+Most sheets work with defaults. If a character has a color very close to the background (e.g. pale skin on a white bg), the edge may get eaten — raise `--hard-dist` and `--soft-dist` together. If JPEG noise leaks into the foreground as little specks, raise `--min-area`.
+
+If the script reports `WARN: blob count doesn't match grid`, it means two characters are touching, or noise blobs are bigger than `min_area`. It falls back to splitting by the nominal grid in that case, which usually still works but is less clean.
+
+## How it works
+
+1. **Detect bg.** Median RGB of the four 16×16 corner patches.
+2. **Build alpha.** For each pixel, compute Euclidean distance to bg color. Soft ramp from `hard_dist` to `soft_dist` gives anti-aliased edges.
+3. **Rescue interior.** Flood-fill bg pixels starting from the image border. Any bg-colored pixel *not* reached from a border is interior — restore to opaque.
+4. **Find characters.** `scipy.ndimage.label` on the alpha mask. Each blob bigger than `min_area` is a character.
+5. **Sort to grid.** Sort blobs by Y, slice into rows, sort each row by X.
+6. **Place.** Compute uniform cell size = max blob bbox + padding. Center each character in its cell.
+
+## License
+
+MIT
