@@ -247,6 +247,27 @@ def trim_outline(rgba: np.ndarray, n: int) -> np.ndarray:
     return out
 
 
+def draw_border(rgba: np.ndarray, n: int, color=(0, 0, 0)) -> np.ndarray:
+    """Draw a solid outline of width `n` px around each character.
+
+    The outline is drawn *outside* the silhouette with rounded corners: the
+    ring is the disk-dilation of the silhouette minus the silhouette itself,
+    painted opaque `color` (black by default). Because it grows the footprint
+    outward, the width is bounded by the transparent padding around each frame.
+    """
+    out = rgba.copy()
+    if n <= 0:
+        return out
+    mask = out[:, :, 3] > 32
+    yy, xx = np.ogrid[-n:n + 1, -n:n + 1]
+    disk = (xx ** 2 + yy ** 2) <= n ** 2          # rounded structuring element
+    dilated = ndimage.binary_dilation(mask, structure=disk)
+    ring = dilated & ~mask
+    out[ring, :3] = color
+    out[ring, 3] = 255
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("input")
@@ -268,6 +289,9 @@ def main():
     ap.add_argument("--trim", type=int, default=0,
                     help="erode each character's edge inward by this many pixels "
                          "(removes leftover fringe); 0 = off")
+    ap.add_argument("--border", type=int, default=0,
+                    help="draw a solid black outline this many pixels wide around "
+                         "each character; 0 = off")
     args = ap.parse_args()
 
     if args.output:
@@ -307,6 +331,10 @@ def main():
     if args.trim > 0:
         out = trim_outline(out, args.trim)
         print(f"trimmed outline by {args.trim}px")
+
+    if args.border > 0:
+        out = draw_border(out, args.border)
+        print(f"drew black border {args.border}px wide")
 
     Image.fromarray(out, "RGBA").save(output)
     print(f"wrote {output}: {out.shape[1]}x{out.shape[0]}")

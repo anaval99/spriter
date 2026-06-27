@@ -35,8 +35,9 @@ python app.py
 ```
 
 Upload a spritesheet, set cols/rows (default 4×4), click **Run cleanup** to see the
-transparent result, optionally enter a pixel amount and click **Trim outline** to shave
-leftover fringe off each character's edge, then **Download PNG**.
+transparent result. Optionally set a **trim** amount (shaves leftover fringe off each
+character's edge) and/or a **draw border** amount (a solid black outline around each
+character), then click **Apply**. Finally **Download PNG**.
 
 ## Usage (CLI)
 
@@ -72,6 +73,7 @@ python clean_spritesheet.py walk.png walk_clean.png --cols 8 --rows 4
 | `--padding` | 8 | Transparent pixels around each character in the output |
 | `--min-area` | 2000 | Ignore connected blobs smaller than this (filters JPEG noise) |
 | `--trim` | 0 | Erode each character's edge inward by N pixels (removes leftover fringe) |
+| `--border` | 0 | Draw a solid black outline N pixels wide around each character |
 
 ### Tuning
 

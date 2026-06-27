@@ -18,7 +18,7 @@ import numpy as np
 from flask import Flask, request, send_file, render_template_string
 from PIL import Image
 
-from clean_spritesheet import clean_image, trim_outline
+from clean_spritesheet import clean_image, trim_outline, draw_border
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB
@@ -82,13 +82,15 @@ PAGE = """<!doctype html>
   </fieldset>
 
   <fieldset>
-    <legend>2 &middot; Trim outline (optional)</legend>
-    <p class="sub" style="margin-top:0">Shave stray pixels off each character's edge.
-       Re-applies from the clean result each time, so you can adjust freely.</p>
+    <legend>2 &middot; Trim &amp; border (optional)</legend>
+    <p class="sub" style="margin-top:0">Trim shaves stray pixels off each character's edge;
+       border draws a solid black outline around it. Both re-apply from the clean result
+       each time (trim first, then border), so you can adjust freely.</p>
     <p>
-      <label>Trim by pixel amount <input type="number" id="trim" value="1" min="0"></label>
-      <button id="trimBtn" class="secondary" disabled>Trim outline</button>
+      <label>Trim by pixel amount <input type="number" id="trim" value="0" min="0"></label>
+      <label>Draw border px <input type="number" id="border" value="0" min="0"></label>
     </p>
+    <button id="applyBtn" class="secondary" disabled>Apply</button>
   </fieldset>
 
   <div id="status"></div>
@@ -133,7 +135,7 @@ $('cleanBtn').addEventListener('click', async () => {
     if (!res.ok) throw new Error(await res.text());
     baseBlob = await res.blob();
     show(baseBlob);
-    $('trimBtn').disabled = false;
+    $('applyBtn').disabled = false;
     setStatus('Cleaned. ' + (res.headers.get('X-Spriter-Info') || ''));
   } catch (e) {
     setStatus('Error: ' + e.message);
@@ -142,22 +144,24 @@ $('cleanBtn').addEventListener('click', async () => {
   }
 });
 
-$('trimBtn').addEventListener('click', async () => {
+$('applyBtn').addEventListener('click', async () => {
   if (!baseBlob) return;
   const fd = new FormData();
   fd.append('image', baseBlob, 'base.png');
   fd.append('n', $('trim').value);
-  setStatus('Trimming...');
-  $('trimBtn').disabled = true;
+  fd.append('border', $('border').value);
+  setStatus('Applying...');
+  $('applyBtn').disabled = true;
   try {
-    const res = await fetch('/trim', { method: 'POST', body: fd });
+    const res = await fetch('/process', { method: 'POST', body: fd });
     if (!res.ok) throw new Error(await res.text());
     show(await res.blob());
-    setStatus('Trimmed by ' + $('trim').value + 'px (from the clean result).');
+    setStatus('Trim ' + $('trim').value + 'px, border ' + $('border').value
+              + 'px (from the clean result).');
   } catch (e) {
     setStatus('Error: ' + e.message);
   } finally {
-    $('trimBtn').disabled = false;
+    $('applyBtn').disabled = false;
   }
 });
 </script>
@@ -189,14 +193,17 @@ def clean():
     return resp
 
 
-@app.post("/trim")
-def trim():
+@app.post("/process")
+def process():
     file = request.files.get("image")
     if file is None:
         return "no image uploaded", 400
     n = max(0, int(request.form.get("n", 0)))
+    border = max(0, int(request.form.get("border", 0)))
     rgba = np.array(Image.open(file.stream).convert("RGBA"))
-    return _png_response(trim_outline(rgba, n))
+    out = trim_outline(rgba, n)
+    out = draw_border(out, border)
+    return _png_response(out)
 
 
 if __name__ == "__main__":
