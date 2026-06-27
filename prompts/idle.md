@@ -7,4 +7,6 @@ shoulders, slight head and weight shift, and gentle secondary motion on hair,
 cloth, or accessories. All 16 frames must use the same scale and framing with the
 character centered in each cell, and the sequence (left to right, top to bottom)
 should loop seamlessly from the last frame back to the first. Make sure the
-spritesheet is ready to use. Always use a transparent background.
+spritesheet is ready to use. Always use a transparent background. Do not draw any
+grid lines, borders, or dividers between the cells, and do not add any shadows
+(no drop shadows and no ground/cast shadows).

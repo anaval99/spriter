@@ -32,9 +32,11 @@ cleaner.
   row-major order (left→right, top→bottom) as the animation sequence.
 - **Transparent background, always.** The prompt must explicitly ask for a true
   transparent (alpha) background, not a solid color.
-- **Ready to use.** Ask for consistent framing/scale across all 16 frames, the
-  character centered in each cell, and no text, labels, grid lines, drop shadows,
-  or watermarks.
+- **Ready to use.** Ask for consistent framing/scale across all 16 frames and the
+  character centered in each cell, with no text, labels, or watermarks.
+- **No grid lines, no shadows.** Explicitly forbid grid lines, borders, or dividers
+  between cells, and any shadows (drop shadows and ground/cast shadows). They confuse
+  the cleaner's frame detection and bleed into neighboring cells.
 - **Animation over translation.** Prompts should describe *believable motion*
   (e.g. breathing, weight shift, secondary motion on hair/cloth) rather than
   naively sliding the same static image around.
@@ -44,9 +46,10 @@ cleaner.
 ## Writing a new prompt
 
 Create a new `<name>.md` (one animation per file) and keep it short — a single
-imperative paragraph the user can paste directly. It must restate the four
+imperative paragraph the user can paste directly. It must restate the
 non-negotiables every time: **4×4 / 16 frames**, **transparent background**,
-**ready to use**, and **real animation (not a static image moved around)**.
+**no grid lines or shadows**, **ready to use**, and **real animation (not a static
+image moved around)**.
 
 ## Available prompts
 
