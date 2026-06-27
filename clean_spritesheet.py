@@ -29,35 +29,92 @@ from PIL import Image
 from scipy import ndimage
 
 
-def detect_bg_color(rgb: np.ndarray, sample: int = 16) -> np.ndarray:
-    """Median color across the four corner patches. Robust to JPEG noise."""
+def detect_bg_colors(rgb: np.ndarray, border: int = 6) -> np.ndarray:
+    """Detect 1 or 2 background colors from a thin ring along the image edge.
+
+    AI image tools often bake the "transparency" checkerboard into the
+    image as two alternating near-white/gray colors instead of real alpha.
+    The outermost ring of pixels is almost always pure background (centered
+    characters don't reach the edge), so we sample it and cluster into two
+    groups. If both groups are substantial and only moderately separated
+    (consistent with two checker tiles, not a saturated character color),
+    we return both; otherwise we return the single dominant color.
+
+    Returns an array of shape (k, 3), k in {1, 2}.
+    """
+    from scipy.cluster.vq import kmeans2
+
     H, W = rgb.shape[:2]
-    s = sample
-    patches = [
-        rgb[:s, :s],
-        rgb[:s, W - s:],
-        rgb[H - s:, :s],
-        rgb[H - s:, W - s:],
-    ]
-    all_px = np.concatenate([p.reshape(-1, 3) for p in patches], axis=0)
-    return np.median(all_px, axis=0).astype(np.float32)
+    b = max(1, min(border, H // 2, W // 2))
+    ring = np.concatenate([
+        rgb[:b, :].reshape(-1, 3),
+        rgb[-b:, :].reshape(-1, 3),
+        rgb[b:-b, :b].reshape(-1, 3),
+        rgb[b:-b, -b:].reshape(-1, 3),
+    ], axis=0).astype(np.float32)
+
+    # Perfectly uniform ring (no noise) -> single color; skip clustering so
+    # kmeans doesn't warn about an empty second cluster.
+    if ring.std(axis=0).max() < 2.0:
+        return ring.mean(axis=0).astype(np.float32)[None, :]
+
+    centers, labels = kmeans2(ring, 2, minit="++", seed=0)
+    counts = np.bincount(labels, minlength=2)
+    dominant = int(np.argmax(counts))
+    spread = float(np.sqrt(((centers[0] - centers[1]) ** 2).sum()))
+
+    # A checkerboard: both tiles well-represented and within a plausible
+    # gray/white separation. A large spread means the minority cluster is a
+    # character color that touched the edge, not a second background tile.
+    is_checker = counts.min() >= 0.20 * counts.sum() and 12.0 <= spread <= 140.0
+    if is_checker:
+        return centers.astype(np.float32)
+    return centers[dominant].astype(np.float32)[None, :]
 
 
-def build_alpha(rgb: np.ndarray, bg_color: np.ndarray,
+def _dist_to_bg(rgb: np.ndarray, bg_colors: np.ndarray) -> np.ndarray:
+    """Per-pixel RGB distance to the background.
+
+    For a single bg color this is plain Euclidean distance. For two colors
+    (a checkerboard) it's the distance to the *line segment* between them,
+    so the two checker colors and every anti-aliased blend in between read
+    as background.
+    """
+    p = rgb.astype(np.float32)
+    if len(bg_colors) == 1:
+        diff = p - bg_colors[0]
+        return np.sqrt((diff ** 2).sum(axis=2))
+
+    a, b = bg_colors[0], bg_colors[1]
+    ab = b - a
+    ab2 = float(ab @ ab)
+    if ab2 < 1e-6:
+        diff = p - a
+        return np.sqrt((diff ** 2).sum(axis=2))
+    t = ((p - a) @ ab) / ab2
+    t = np.clip(t, 0.0, 1.0)
+    proj = a + t[..., None] * ab
+    diff = p - proj
+    return np.sqrt((diff ** 2).sum(axis=2))
+
+
+def build_alpha(rgb: np.ndarray, bg_colors: np.ndarray,
                 hard_dist: float = 18.0, soft_dist: float = 40.0) -> np.ndarray:
     """
-    Soft alpha by RGB distance from the background color:
+    Soft alpha by RGB distance from the background:
       distance <= hard_dist            -> alpha 0
       hard_dist < distance < soft_dist -> linear ramp
       distance >= soft_dist            -> alpha 255
+
+    `bg_colors` is a (k, 3) array (k in {1, 2}); distance is measured to the
+    nearest background color / blend (see `_dist_to_bg`).
 
     Then rescue interior near-bg pixels by flood-filling background only
     from the image border. Anything classified as bg but not reachable
     from a border is restored to opaque (e.g. a pale highlight inside a
     helmet).
     """
-    diff = rgb.astype(np.float32) - bg_color.astype(np.float32)
-    dist = np.sqrt((diff ** 2).sum(axis=2))
+    dist = _dist_to_bg(rgb, bg_colors)
 
     span = max(soft_dist - hard_dist, 1e-6)
     alpha = np.clip((dist - hard_dist) * (255.0 / span),
@@ -115,7 +172,9 @@ def main():
     ap.add_argument("--cols", type=int, default=4)
     ap.add_argument("--rows", type=int, default=4)
     ap.add_argument("--bg-color", type=str, default=None,
-                    help="override auto-detection, e.g. '253,232,237'")
+                    help="override auto-detection. One color '253,232,237', or "
+                         "two (for a checkerboard) separated by ';': "
+                         "'255,255,255;232,232,231'")
     ap.add_argument("--hard-dist", type=float, default=18.0,
                     help="color distance below which pixels are fully transparent")
     ap.add_argument("--soft-dist", type=float, default=40.0,
@@ -127,20 +186,27 @@ def main():
 
     if args.output:
         output = args.output
+        if Path(output).suffix.lower() not in (".png", ""):
+            # The output carries transparency, which only PNG can store here.
+            output = str(Path(output).with_suffix(".png"))
+            print(f"note: forcing PNG output -> {output}")
     else:
         p = Path(args.input)
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        output = str(p.with_name(f"{p.stem}.{ts}{p.suffix or '.png'}"))
+        # Always PNG: output has an alpha channel, which JPEG can't store.
+        output = str(p.with_name(f"{p.stem}.{ts}.png"))
 
     src = Image.open(args.input).convert("RGB")
     rgb = np.array(src)
     print(f"loaded {args.input}: {src.size[0]}x{src.size[1]}")
 
     if args.bg_color:
-        bg = np.array([int(x) for x in args.bg_color.split(",")], dtype=np.float32)
+        bg = np.array([[int(x) for x in part.split(",")]
+                       for part in args.bg_color.split(";")], dtype=np.float32)
     else:
-        bg = detect_bg_color(rgb)
-    print(f"background color: RGB({int(bg[0])}, {int(bg[1])}, {int(bg[2])})")
+        bg = detect_bg_colors(rgb)
+    print("background color(s): " +
+          ", ".join(f"RGB({int(c[0])}, {int(c[1])}, {int(c[2])})" for c in bg))
 
     alpha = build_alpha(rgb, bg, args.hard_dist, args.soft_dist)
     print(f"foreground coverage: {(alpha > 0).mean() * 100:.1f}%")

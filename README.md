@@ -5,14 +5,14 @@ Clean up AI-generated spritesheets (Gemini, ChatGPT, etc.) by removing solid-col
 ## What it does
 
 AI image models tend to produce spritesheets with three problems:
-1. **No real transparency** — the background is a solid color (white, pink, gray) instead of an alpha channel.
+1. **No real transparency** — the background is a solid color (white, pink, gray), or a *baked-in checkerboard* (the fake-transparency pattern saved as real pixels), instead of an alpha channel.
 2. **Frame bleed** — parts of one character spill into the neighboring cell.
 3. **Misalignment** — characters aren't centered consistently in their cells.
 
 This script fixes all three:
 
-- Auto-detects the background color from the four corners.
-- Converts background pixels to true alpha with a soft anti-aliased edge.
+- Auto-detects the background from the four corners — a single solid color, or the two colors of a checkerboard pattern.
+- Converts background pixels to true alpha with a soft anti-aliased edge. For checkerboards, distance is measured to the color *blend* between the two squares, so the seams disappear too.
 - Uses a border flood-fill so pale pixels inside the character (highlights, etc.) aren't eaten.
 - Finds each character via connected-components on the alpha mask — so grid misalignment and frame bleed don't matter.
 - Re-centers every character in a uniform cell.
@@ -51,7 +51,7 @@ python clean_spritesheet.py walk.png walk_clean.png --cols 8 --rows 4
 | --- | --- | --- |
 | `--cols` | 4 | Columns in the grid |
 | `--rows` | 4 | Rows in the grid |
-| `--bg-color` | (auto) | Override bg detection, e.g. `--bg-color 253,232,237` |
+| `--bg-color` | (auto) | Override bg detection. One color `253,232,237`, or two (checkerboard) separated by `;`: `255,255,255;232,232,231` |
 | `--hard-dist` | 18 | Color distance below which a pixel is fully transparent |
 | `--soft-dist` | 40 | Distance above which a pixel is fully opaque (ramp between) |
 | `--padding` | 8 | Transparent pixels around each character in the output |
@@ -65,8 +65,8 @@ If the script reports `WARN: blob count doesn't match grid`, it means two charac
 
 ## How it works
 
-1. **Detect bg.** Median RGB of the four 16×16 corner patches.
-2. **Build alpha.** For each pixel, compute Euclidean distance to bg color. Soft ramp from `hard_dist` to `soft_dist` gives anti-aliased edges.
+1. **Detect bg.** Cluster the four corner patches into up to two colors. Two populated, well-separated clusters → a checkerboard; otherwise the median is the single bg color.
+2. **Build alpha.** For each pixel, compute distance to the bg color — or, for a checkerboard, to the line segment between the two colors. Soft ramp from `hard_dist` to `soft_dist` gives anti-aliased edges.
 3. **Rescue interior.** Flood-fill bg pixels starting from the image border. Any bg-colored pixel *not* reached from a border is interior — restore to opaque.
 4. **Find characters.** `scipy.ndimage.label` on the alpha mask. Each blob bigger than `min_area` is a character.
 5. **Sort to grid.** Sort blobs by Y, slice into rows, sort each row by X.
